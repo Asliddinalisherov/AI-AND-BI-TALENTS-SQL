@@ -1,0 +1,148 @@
+import requests
+from bs4 import BeautifulSoup
+import pandas as pd
+from datetime import datetime
+import openpyxl
+import time
+
+def scrape_brawlstats(player_id):
+    # Configure headers to mimic a real browser
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+    }
+    
+    # Step 1: URL Construction
+    url = f"https://brawlstats.com/profile/{player_id}"
+    print(f"Attempting to access: {url}")
+    
+    try:
+        # Step 2: Web Scraping with retries
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = requests.get(url, headers=headers, timeout=10)
+                response.raise_for_status()
+                
+                # Check if page contains player data
+                if "Player Not Found" in response.text:
+                    raise ValueError("Player ID not found on BrawlStats.com")
+                
+                soup = BeautifulSoup(response.text, 'html.parser')
+                break
+            except requests.exceptions.RequestException as e:
+                if attempt == max_retries - 1:
+                    raise
+                print(f"Attempt {attempt + 1} failed, retrying...")
+                time.sleep(2)
+        
+        # Debug: Save HTML for inspection
+        with open("debug_page.html", "w", encoding="utf-8") as f:
+            f.write(response.text)
+        print("Saved page HTML to debug_page.html for inspection")
+        
+        # Find all brawler cards - this selector might need adjustment
+        brawler_cards = soup.find_all('div', class_='brawler-card')
+        if not brawler_cards:
+            raise ValueError("No brawler cards found - website structure may have changed")
+        
+        print(f"Found {len(brawler_cards)} brawler cards")
+        
+        data = []
+        
+        for card in brawler_cards:
+            try:
+                # Extract brawler name
+                name_element = card.find('div', class_='brawler-name')
+                brawler_name = name_element.text.strip().upper() if name_element else "UNKNOWN"
+                
+                # Extract level
+                level_element = card.find('div', class_='brawler-level')
+                level_text = level_element.text.strip() if level_element else "0"
+                level = int(''.join(filter(str.isdigit, level_text)) or 0)
+                
+                # Extract rank
+                rank_element = card.find('div', class_='brawler-rank')
+                rank_text = rank_element.text.strip() if rank_element else "0"
+                rank = int(''.join(filter(str.isdigit, rank_text)) or 0
+                
+                # Extract trophies
+                trophies_element = card.find('div', class_='brawler-trophies')
+                if trophies_element:
+                    trophies_text = trophies_element.text.strip()
+                    trophies_parts = trophies_text.split('/')
+                    current_trophies = int(trophies_parts[0].strip()) if len(trophies_parts) > 0 else 0
+                    max_trophies = int(trophies_parts[1].strip()) if len(trophies_parts) > 1 else 0
+                else:
+                    current_trophies = max_trophies = 0
+                
+                # Extract gadgets and star powers
+                gadgets = 0
+                star_powers = 0
+                abilities = card.find_all('div', class_='brawler-ability')
+                
+                for ability in abilities:
+                    img = ability.find('img')
+                    if img and 'src' in img.attrs:
+                        if 'gadget' in img['src'].lower():
+                            gadgets += 1
+                        elif 'star-power' in img['src'].lower():
+                            star_powers += 1
+                
+                data.append([brawler_name, level, rank, current_trophies, max_trophies, gadgets, star_powers])
+                
+            except Exception as e:
+                print(f"Error processing brawler card: {e}")
+                continue
+        
+        if not data:
+            raise ValueError("No brawler data could be extracted")
+        
+        # Create DataFrame
+        df = pd.DataFrame(data, columns=["Brawler", "Level", "Rank", "Current Trophies", "Max Trophies", "Gadgets", "Star Powers"])
+        
+        # Clean Data
+        df.fillna(0, inplace=True)
+        
+        # Sorting
+        df.sort_values(by=['Max Trophies', 'Current Trophies', 'Brawler'], 
+                       ascending=[False, False, True], inplace=True)
+        
+        # Create DataFrame for Level >= 9
+        df2 = df[df['Level'] >= 9].copy()
+        
+        # Export to Excel
+        current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{player_id}_{current_time}.xlsx"
+        
+        with pd.ExcelWriter(filename, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name='All Brawlers', index=False)
+            if not df2.empty:
+                df2.to_excel(writer, sheet_name='Ranked Brawlers (Lvl 9+)', index=False)
+            else:
+                pd.DataFrame().to_excel(writer, sheet_name='Ranked Brawlers (Lvl 9+)')
+        
+        print(f"\nSuccess! Data saved to {filename}")
+        print("\nSample of the data extracted:")
+        print(df.head())
+        
+        return df, df2
+        
+    except Exception as e:
+        print(f"\nError: {e}")
+        print("\nPossible solutions:")
+        print("- Check if the player ID is correct and exists on brawlstats.com")
+        print("- The website structure may have changed - check debug_page.html")
+        print("- The website might be blocking scrapers - try again later")
+        return None, None
+
+if __name__ == "__main__":
+    print("BrawlStats.com Player Data Scraper")
+    print("----------------------------------")
+    player_id = input("Enter the player ID (e.g., P9QRLG9RU): ").strip()
+    
+    # Validate player ID format
+    if not player_id or len(player_id) < 3:
+        print("Error: Invalid player ID format")
+    else:
+        scrape_brawlstats(player_id)
