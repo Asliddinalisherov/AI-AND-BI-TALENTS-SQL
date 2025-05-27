@@ -1,0 +1,21 @@
+DECLARE @Year INT = 2025;
+DECLARE @Month INT = 5;
+
+WITH DateRange AS (
+    SELECT DATEFROMPARTS(@Year, @Month, 1) AS DateValue
+    UNION ALL
+    SELECT DATEADD(DAY, 1, DateValue)
+    FROM DateRange
+    WHERE DATEADD(DAY, 1, DateValue) <= EOMONTH(DATEFROMPARTS(@Year, @Month, 1))
+)
+SELECT 
+    MIN(CASE WHEN DATEPART(WEEKDAY, DateValue) = 1 THEN DateValue END) AS Sunday,
+    MIN(CASE WHEN DATEPART(WEEKDAY, DateValue) = 2 THEN DateValue END) AS Monday,
+    MIN(CASE WHEN DATEPART(WEEKDAY, DateValue) = 3 THEN DateValue END) AS Tuesday,
+    MIN(CASE WHEN DATEPART(WEEKDAY, DateValue) = 4 THEN DateValue END) AS Wednesday,
+    MIN(CASE WHEN DATEPART(WEEKDAY, DateValue) = 5 THEN DateValue END) AS Thursday,
+    MIN(CASE WHEN DATEPART(WEEKDAY, DateValue) = 6 THEN DateValue END) AS Friday,
+    MIN(CASE WHEN DATEPART(WEEKDAY, DateValue) = 7 THEN DateValue END) AS Saturday
+FROM DateRange
+GROUP BY DATEPART(WEEK, DateValue)
+OPTION (MAXRECURSION 31);
